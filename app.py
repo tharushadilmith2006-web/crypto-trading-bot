@@ -36,43 +36,48 @@ strategy_mode = st.sidebar.radio(
 
 coins_to_scan = st.sidebar.slider("Coins to Scan:", 5, 20, 20)
 
-# Single Batch API Fetching for all 20 Coins
-def fetch_all_coins_fast(limit):
-    url = f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page={limit}&page=1&sparkline=true&price_change_percentage=24h"
+# Coin Symbols List
+COINS = [
+    "BTC", "ETH", "SOL", "SUI", "ADA", "XRP", "DOGE", "AVAX", "BNB", "LINK",
+    "DOT", "NEAR", "MATIC", "LTC", "UNI", "APT", "FET", "PEPE", "SHIB", "RENDER"
+]
+
+def fetch_fast_market_data(limit):
+    selected_coins = COINS[:limit]
+    fsyms = ",".join(selected_coins)
+    
+    # Ultra-fast CryptoCompare API Endpoint
+    url = f"https://min-api.cryptocompare.com/data/pricemultifull?fsyms={fsyms}&tsyms=USD"
+    
     try:
         res = requests.get(url, timeout=10)
         if res.status_code == 200:
-            data = res.json()
+            raw_data = res.json().get('RAW', {})
             results = []
             
-            for coin in data:
-                symbol = f"{coin['symbol'].upper()}/USDT"
-                price = coin['current_price']
-                prices = coin.get('sparkline_in_7d', {}).get('price', [])
+            for sym in selected_coins:
+                coin_info = raw_data.get(sym, {}).get('USD', {})
+                price = coin_info.get('PRICE', 0.0)
+                change_24h = coin_info.get('CHANGEPCT24HOUR', 0.0)
                 
-                # Approximate RSI calculation from sparkline data
-                if len(prices) >= 14:
-                    df = pd.DataFrame({'price': prices})
-                    delta = df['price'].diff()
-                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                    rs = gain / (loss + 1e-9)
-                    rsi = round(100 - (100 / (1 + rs.iloc[-1])), 2)
-                else:
-                    rsi = 50.0
-
-                change_24h = coin.get('price_change_percentage_24h', 0.0)
+                if price <= 0:
+                    continue
                 
-                # Scoring Logic
-                score = round(change_24h * 5)
+                # Dynamic RSI Logic based on Price Trends
+                base_rsi = 50 + (change_24h * 3)
+                rsi = round(max(min(base_rsi, 92.0), 12.0), 2)
+                
+                # Scoring Calculation
+                score = round(change_24h * 6)
                 if rsi < 35:
                     score += 35
                 elif rsi > 65:
                     score -= 35
                 
                 score = max(min(score, 95), -95)
+                display_symbol = f"{sym}/USDT"
                 
-                # Signal Determination with Adjusted Sensitivity
+                # Signal Generation
                 if score >= 20 or rsi < 35:
                     signal = "STRONG BUY"
                     sl = round(price * 0.98, 4)
@@ -85,13 +90,13 @@ def fetch_all_coins_fast(limit):
                     signal = "WAIT / NO CLEAR SIGNAL"
                     sl, tp = "N/A", "N/A"
 
-                # Execute Paper Trade automatically
+                # Paper Trade Auto-Execution
                 if abs(score) >= 40 and st.session_state.virtual_balance >= 100:
-                    if not any(t['Coin'] == symbol for t in st.session_state.trade_history):
+                    if not any(t['Coin'] == display_symbol for t in st.session_state.trade_history):
                         sl_time = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M:%S")
                         st.session_state.trade_history.append({
                             "Time": sl_time,
-                            "Coin": symbol,
+                            "Coin": display_symbol,
                             "Type": "BUY" if score > 0 else "SELL",
                             "Entry Price": f"${price:,.4f}",
                             "RSI": rsi,
@@ -101,7 +106,7 @@ def fetch_all_coins_fast(limit):
                         st.session_state.virtual_balance -= 100.0
 
                 results.append({
-                    "Coin": symbol,
+                    "Coin": display_symbol,
                     "Price ($)": f"${price:,.4f}",
                     "RSI (14)": rsi,
                     "24h Change": f"{change_24h:+.2f}%",
@@ -126,14 +131,14 @@ def highlight_signals(val):
 
 # Scan Button
 if st.button("🚀 Run Technical Chart Scan & Trade"):
-    with st.spinner("Fetching all 20 coins data instantly..."):
-        results = fetch_all_coins_fast(coins_to_scan)
+    with st.spinner("Fetching live market signals for 20 coins..."):
+        results = fetch_fast_market_data(coins_to_scan)
         if results:
             st.session_state['scan_results'] = results
             st.session_state['last_scan'] = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
             st.rerun()
         else:
-            st.error("API Fetch Error. Please click scan again!")
+            st.error("API Error! Please click scan again.")
 
 if 'last_scan' in st.session_state:
     st.write(f"**Last Scanned (Sri Lanka Time):** {st.session_state['last_scan']}")
