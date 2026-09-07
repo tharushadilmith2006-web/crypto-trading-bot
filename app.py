@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="Binance Trading Bot", layout="wide", page_icon="📈")
 
 st.title("📈 AI Crypto Technical Analysis & Trading Bot")
-st.caption("RSI, Trend Analysis & Paper Trading | All 20 Coins Simultaneously")
+st.caption("Binance Live Data | RSI, Trend Analysis & Paper Trading")
 st.write("---")
 
 # Session state initialization
@@ -36,85 +36,79 @@ strategy_mode = st.sidebar.radio(
 
 coins_to_scan = st.sidebar.slider("Coins to Scan:", 5, 20, 20)
 
-# Coin Symbols List
-COINS = [
-    "BTC", "ETH", "SOL", "SUI", "ADA", "XRP", "DOGE", "AVAX", "BNB", "LINK",
-    "DOT", "NEAR", "MATIC", "LTC", "UNI", "APT", "FET", "PEPE", "SHIB", "RENDER"
+COINS_LIST = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT", "ADAUSDT", 
+    "XRPUSDT", "DOGEUSDT", "AVAXUSDT", "BNBUSDT", "LINKUSDT", 
+    "DOTUSDT", "NEARUSDT", "MATICUSDT", "LTCUSDT", "UNIUSDT", 
+    "APTUSDT", "FETUSDT", "PEPEUSDT", "SHIBUSDT", "RENDERUSDT"
 ]
 
-def fetch_fast_market_data(limit):
-    selected_coins = COINS[:limit]
-    fsyms = ",".join(selected_coins)
-    
-    # Ultra-fast CryptoCompare API Endpoint
-    url = f"https://min-api.cryptocompare.com/data/pricemultifull?fsyms={fsyms}&tsyms=USD"
-    
+def fetch_binance_data(limit):
+    url = "https://api.binance.com/api/v3/ticker/24hr"
     try:
         res = requests.get(url, timeout=10)
         if res.status_code == 200:
-            raw_data = res.json().get('RAW', {})
+            all_tickers = {item['symbol']: item for item in res.json()}
             results = []
+            selected = COINS_LIST[:limit]
             
-            for sym in selected_coins:
-                coin_info = raw_data.get(sym, {}).get('USD', {})
-                price = coin_info.get('PRICE', 0.0)
-                change_24h = coin_info.get('CHANGEPCT24HOUR', 0.0)
-                
-                if price <= 0:
-                    continue
-                
-                # Dynamic RSI Logic based on Price Trends
-                base_rsi = 50 + (change_24h * 3)
-                rsi = round(max(min(base_rsi, 92.0), 12.0), 2)
-                
-                # Scoring Calculation
-                score = round(change_24h * 6)
-                if rsi < 35:
-                    score += 35
-                elif rsi > 65:
-                    score -= 35
-                
-                score = max(min(score, 95), -95)
-                display_symbol = f"{sym}/USDT"
-                
-                # Signal Generation
-                if score >= 20 or rsi < 35:
-                    signal = "STRONG BUY"
-                    sl = round(price * 0.98, 4)
-                    tp = round(price * 1.04, 4)
-                elif score <= -20 or rsi > 65:
-                    signal = "STRONG SELL"
-                    sl = round(price * 1.02, 4)
-                    tp = round(price * 0.96, 4)
-                else:
-                    signal = "WAIT / NO CLEAR SIGNAL"
-                    sl, tp = "N/A", "N/A"
+            for sym in selected:
+                if sym in all_tickers:
+                    data = all_tickers[sym]
+                    price = float(data['lastPrice'])
+                    change_24h = float(data['priceChangePercent'])
+                    
+                    # Estimate Technical Indicators (RSI & Trend) from Price Action
+                    base_rsi = 50 + (change_24h * 2.5)
+                    rsi = round(max(min(base_rsi, 95.0), 10.0), 2)
+                    
+                    score = round(change_24h * 5)
+                    if rsi < 35:
+                        score += 30
+                    elif rsi > 65:
+                        score -= 30
+                    
+                    score = max(min(score, 95), -95)
+                    display_symbol = sym.replace("USDT", "/USDT")
+                    
+                    # Signal Generation
+                    if score >= 15 or rsi < 35:
+                        signal = "STRONG BUY"
+                        sl = round(price * 0.98, 4)
+                        tp = round(price * 1.04, 4)
+                    elif score <= -15 or rsi > 65:
+                        signal = "STRONG SELL"
+                        sl = round(price * 1.02, 4)
+                        tp = round(price * 0.96, 4)
+                    else:
+                        signal = "WAIT / NO CLEAR SIGNAL"
+                        sl, tp = "N/A", "N/A"
 
-                # Paper Trade Auto-Execution
-                if abs(score) >= 40 and st.session_state.virtual_balance >= 100:
-                    if not any(t['Coin'] == display_symbol for t in st.session_state.trade_history):
-                        sl_time = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M:%S")
-                        st.session_state.trade_history.append({
-                            "Time": sl_time,
-                            "Coin": display_symbol,
-                            "Type": "BUY" if score > 0 else "SELL",
-                            "Entry Price": f"${price:,.4f}",
-                            "RSI": rsi,
-                            "Amount": "$100.00",
-                            "Status": "OPEN"
-                        })
-                        st.session_state.virtual_balance -= 100.0
+                    # Paper Trade Execution
+                    if abs(score) >= 30 and st.session_state.virtual_balance >= 100:
+                        if not any(t['Coin'] == display_symbol for t in st.session_state.trade_history):
+                            sl_time = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M:%S")
+                            st.session_state.trade_history.append({
+                                "Time": sl_time,
+                                "Coin": display_symbol,
+                                "Type": "BUY" if score > 0 else "SELL",
+                                "Entry Price": f"${price:,.4f}",
+                                "RSI": rsi,
+                                "Amount": "$100.00",
+                                "Status": "OPEN"
+                            })
+                            st.session_state.virtual_balance -= 100.0
 
-                results.append({
-                    "Coin": display_symbol,
-                    "Price ($)": f"${price:,.4f}",
-                    "RSI (14)": rsi,
-                    "24h Change": f"{change_24h:+.2f}%",
-                    "Score": score,
-                    "Signal": signal,
-                    "Stop Loss ($)": f"${sl:,.4f}" if isinstance(sl, float) else sl,
-                    "Take Profit ($)": f"${tp:,.4f}" if isinstance(tp, float) else tp,
-                })
+                    results.append({
+                        "Coin": display_symbol,
+                        "Price ($)": f"${price:,.4f}",
+                        "RSI (14)": rsi,
+                        "24h Change": f"{change_24h:+.2f}%",
+                        "Score": score,
+                        "Signal": signal,
+                        "Stop Loss ($)": f"${sl:,.4f}" if isinstance(sl, float) else sl,
+                        "Take Profit ($)": f"${tp:,.4f}" if isinstance(tp, float) else tp,
+                    })
             return results
     except Exception:
         pass
@@ -131,14 +125,14 @@ def highlight_signals(val):
 
 # Scan Button
 if st.button("🚀 Run Technical Chart Scan & Trade"):
-    with st.spinner("Fetching live market signals for 20 coins..."):
-        results = fetch_fast_market_data(coins_to_scan)
+    with st.spinner("Fetching live market signals from Binance..."):
+        results = fetch_binance_data(coins_to_scan)
         if results:
             st.session_state['scan_results'] = results
             st.session_state['last_scan'] = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
             st.rerun()
         else:
-            st.error("API Error! Please click scan again.")
+            st.error("API Fetch Error. Click again!")
 
 if 'last_scan' in st.session_state:
     st.write(f"**Last Scanned (Sri Lanka Time):** {st.session_state['last_scan']}")
