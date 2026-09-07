@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="Binance Trading Bot", layout="wide", page_icon="📈")
 
 st.title("📈 AI Crypto Technical Analysis & Trading Bot")
-st.caption("Live Market Signals | RSI, Trend Analysis & Paper Trading")
+st.caption("Live Technical Signals | Dynamic RSI Scoring & Paper Trading")
 st.write("---")
 
 # Session state initialization
@@ -36,7 +36,6 @@ strategy_mode = st.sidebar.radio(
 
 coins_to_scan = st.sidebar.slider("Coins to Scan:", 5, 20, 20)
 
-# Coin List Mapping
 COINS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT", "ADAUSDT", 
     "XRPUSDT", "DOGEUSDT", "AVAXUSDT", "BNBUSDT", "LINKUSDT", 
@@ -48,10 +47,9 @@ def fetch_crypto_data(limit):
     selected = COINS[:limit]
     results = []
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
-    # Primary Source: MEXC Global Public API
     try:
         url = "https://api.mexc.com/api/v3/ticker/24hr"
         res = requests.get(url, headers=headers, timeout=8)
@@ -61,19 +59,21 @@ def fetch_crypto_data(limit):
                 if sym in ticker_map:
                     price = float(ticker_map[sym]['lastPrice'])
                     change_24h = float(ticker_map[sym]['priceChangePercent'])
+                    high = float(ticker_map[sym]['highPrice'])
+                    low = float(ticker_map[sym]['lowPrice'])
                     
-                    base_rsi = 50 + (change_24h * 2.5)
-                    rsi = round(max(min(base_rsi, 95.0), 10.0), 2)
+                    # Technical Indicator Calculation (Price Range & RSI)
+                    price_range = high - low if high > low else 1.0
+                    position_in_range = ((price - low) / price_range) * 100
                     
-                    score = round(change_24h * 5)
-                    if rsi < 35:
-                        score += 30
-                    elif rsi > 65:
-                        score -= 30
+                    rsi = round(position_in_range, 2)
                     
-                    score = max(min(score, 95), -95)
+                    # Responsive Scoring Logic (-100 to +100)
+                    score = round((50 - rsi) * 1.8 + (change_24h * 10))
+                    score = max(min(score, 98), -98)
                     display_symbol = sym.replace("USDT", "/USDT")
                     
+                    # Signal Decision
                     if score >= 15 or rsi < 35:
                         signal = "STRONG BUY"
                         sl = round(price * 0.98, 4)
@@ -86,7 +86,7 @@ def fetch_crypto_data(limit):
                         signal = "WAIT / NO CLEAR SIGNAL"
                         sl, tp = "N/A", "N/A"
 
-                    # Paper Trading Logic
+                    # Paper Trade Execution
                     if abs(score) >= 30 and st.session_state.virtual_balance >= 100:
                         if not any(t['Coin'] == display_symbol for t in st.session_state.trade_history):
                             sl_time = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M:%S")
@@ -129,7 +129,7 @@ def highlight_signals(val):
 
 # Scan Button
 if st.button("🚀 Run Technical Chart Scan & Trade"):
-    with st.spinner("Fetching market signals..."):
+    with st.spinner("Analyzing market signals..."):
         results = fetch_crypto_data(coins_to_scan)
         if results:
             st.session_state['scan_results'] = results
