@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="Binance Trading Bot", layout="wide", page_icon="📈")
 
 st.title("📈 AI Crypto Technical Analysis & Trading Bot")
-st.caption("Binance Live Data | RSI, Trend Analysis & Paper Trading")
+st.caption("Live Market Signals | RSI, Trend Analysis & Paper Trading")
 st.write("---")
 
 # Session state initialization
@@ -36,29 +36,32 @@ strategy_mode = st.sidebar.radio(
 
 coins_to_scan = st.sidebar.slider("Coins to Scan:", 5, 20, 20)
 
-COINS_LIST = [
+# Coin List Mapping
+COINS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT", "ADAUSDT", 
     "XRPUSDT", "DOGEUSDT", "AVAXUSDT", "BNBUSDT", "LINKUSDT", 
     "DOTUSDT", "NEARUSDT", "MATICUSDT", "LTCUSDT", "UNIUSDT", 
     "APTUSDT", "FETUSDT", "PEPEUSDT", "SHIBUSDT", "RENDERUSDT"
 ]
 
-def fetch_binance_data(limit):
-    url = "https://api.binance.com/api/v3/ticker/24hr"
+def fetch_crypto_data(limit):
+    selected = COINS[:limit]
+    results = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    # Primary Source: MEXC Global Public API
     try:
-        res = requests.get(url, timeout=10)
+        url = "https://api.mexc.com/api/v3/ticker/24hr"
+        res = requests.get(url, headers=headers, timeout=8)
         if res.status_code == 200:
-            all_tickers = {item['symbol']: item for item in res.json()}
-            results = []
-            selected = COINS_LIST[:limit]
-            
+            ticker_map = {item['symbol']: item for item in res.json()}
             for sym in selected:
-                if sym in all_tickers:
-                    data = all_tickers[sym]
-                    price = float(data['lastPrice'])
-                    change_24h = float(data['priceChangePercent'])
+                if sym in ticker_map:
+                    price = float(ticker_map[sym]['lastPrice'])
+                    change_24h = float(ticker_map[sym]['priceChangePercent'])
                     
-                    # Estimate Technical Indicators (RSI & Trend) from Price Action
                     base_rsi = 50 + (change_24h * 2.5)
                     rsi = round(max(min(base_rsi, 95.0), 10.0), 2)
                     
@@ -71,7 +74,6 @@ def fetch_binance_data(limit):
                     score = max(min(score, 95), -95)
                     display_symbol = sym.replace("USDT", "/USDT")
                     
-                    # Signal Generation
                     if score >= 15 or rsi < 35:
                         signal = "STRONG BUY"
                         sl = round(price * 0.98, 4)
@@ -84,7 +86,7 @@ def fetch_binance_data(limit):
                         signal = "WAIT / NO CLEAR SIGNAL"
                         sl, tp = "N/A", "N/A"
 
-                    # Paper Trade Execution
+                    # Paper Trading Logic
                     if abs(score) >= 30 and st.session_state.virtual_balance >= 100:
                         if not any(t['Coin'] == display_symbol for t in st.session_state.trade_history):
                             sl_time = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M:%S")
@@ -109,9 +111,11 @@ def fetch_binance_data(limit):
                         "Stop Loss ($)": f"${sl:,.4f}" if isinstance(sl, float) else sl,
                         "Take Profit ($)": f"${tp:,.4f}" if isinstance(tp, float) else tp,
                     })
-            return results
+            if results:
+                return results
     except Exception:
         pass
+
     return None
 
 def highlight_signals(val):
@@ -125,14 +129,14 @@ def highlight_signals(val):
 
 # Scan Button
 if st.button("🚀 Run Technical Chart Scan & Trade"):
-    with st.spinner("Fetching live market signals from Binance..."):
-        results = fetch_binance_data(coins_to_scan)
+    with st.spinner("Fetching market signals..."):
+        results = fetch_crypto_data(coins_to_scan)
         if results:
             st.session_state['scan_results'] = results
             st.session_state['last_scan'] = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
             st.rerun()
         else:
-            st.error("API Fetch Error. Click again!")
+            st.error("Network error. Please click scan again.")
 
 if 'last_scan' in st.session_state:
     st.write(f"**Last Scanned (Sri Lanka Time):** {st.session_state['last_scan']}")
