@@ -1,14 +1,13 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# App configs
-st.set_page_config(page_title="Crypto Bot & Paper Trading Engine", layout="wide", page_icon="📈")
+# Streamlit Page Setup
+st.set_page_config(page_title="Binance Trading Bot", layout="wide", page_icon="📈")
 
-# --- UI Layout ---
-st.title("📈 Crypto Bot & Paper Trading Engine")
-st.caption("Virtual Trading Wallet | Strategy Testing | Dynamic Risk Management (1:2 R:R)")
+st.title("📈 AI Crypto Technical Analysis & Trading Bot")
+st.caption("RSI, EMA 20/50 & Trend Analysis | Dynamic Timeframes (15m/1h & 4h/1d)")
 st.write("---")
 
 # Session state initialization
@@ -17,7 +16,7 @@ if 'trade_history' not in st.session_state:
 if 'virtual_balance' not in st.session_state:
     st.session_state.virtual_balance = 1000.0
 
-# Sidebar - Virtual Portfolio
+# Sidebar - Settings
 st.sidebar.header("💰 Virtual Portfolio")
 st.sidebar.metric("Virtual Balance", f"${st.session_state.virtual_balance:,.2f}")
 st.sidebar.write(f"**Total Paper Trades:** {len(st.session_state.trade_history)}")
@@ -31,122 +30,157 @@ st.sidebar.write("---")
 st.sidebar.header("⚙️ Scanner Settings")
 
 strategy_mode = st.sidebar.radio(
-    "Strategy Mode:",
+    "Strategy Timeframe Mode:",
     ["1 - SHORT TERM (15m/1h Focus)", "2 - LONG TERM (4h/1d Focus)"]
 )
 
 coins_to_scan = st.sidebar.slider("Coins to Scan:", 5, 20, 20)
 
-# Coin Mapping for CoinGecko API
-COIN_MAPPING = {
-    "BTCUSDT": ("bitcoin", "BTC/USDT"),
-    "ETHUSDT": ("ethereum", "ETH/USDT"),
-    "SOLUSDT": ("solana", "SOL/USDT"),
-    "SUIUSDT": ("sui", "SUI/USDT"),
-    "ADAUSDT": ("cardano", "ADA/USDT"),
-    "XRPUSDT": ("ripple", "XRP/USDT"),
-    "DOGEUSDT": ("dogecoin", "DOGE/USDT"),
-    "AVAXUSDT": ("avalanche-2", "AVAX/USDT"),
-    "BNBUSDT": ("binancecoin", "BNB/USDT"),
-    "LINKUSDT": ("chainlink", "LINK/USDT"),
-    "DOTUSDT": ("polkadot", "DOT/USDT"),
-    "NEARUSDT": ("near", "NEAR/USDT"),
-    "MATICUSDT": ("polygon-ecosystem-token", "MATIC/USDT"),
-    "LTCUSDT": ("litecoin", "LTC/USDT"),
-    "UNIUSDT": ("uniswap", "UNI/USDT"),
-    "APTUSDT": ("aptos", "APT/USDT"),
-    "FETUSDT": ("artificial-superintelligence-alliance", "FET/USDT"),
-    "PEPEUSDT": ("pepe", "PEPE/USDT"),
-    "SHIBUSDT": ("shiba-inu", "SHIB/USDT"),
-    "RENDERUSDT": ("render-token", "RENDER/USDT")
-}
+# Coin List Mapping
+COINS = [
+    ("bitcoin", "BTC/USDT"), ("ethereum", "ETH/USDT"), ("solana", "SOL/USDT"),
+    ("sui", "SUI/USDT"), ("cardano", "ADA/USDT"), ("ripple", "XRP/USDT"),
+    ("dogecoin", "DOGE/USDT"), ("avalanche-2", "AVAX/USDT"), ("binancecoin", "BNB/USDT"),
+    ("chainlink", "LINK/USDT"), ("polkadot", "DOT/USDT"), ("near", "NEAR/USDT"),
+    ("polygon-ecosystem-token", "MATIC/USDT"), ("litecoin", "LTC/USDT"), ("uniswap", "UNI/USDT"),
+    ("aptos", "APT/USDT"), ("artificial-superintelligence-alliance", "FET/USDT"),
+    ("pepe", "PEPE/USDT"), ("shiba-inu", "SHIB/USDT"), ("render-token", "RENDER/USDT")
+]
 
-def fetch_coingecko_data():
-    """Fetches stable price and 24h change data from CoinGecko API"""
-    selected_keys = list(COIN_MAPPING.keys())[:coins_to_scan]
-    gecko_ids = [COIN_MAPPING[k][0] for k in selected_keys]
-    
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={','.join(gecko_ids)}&vs_currencies=usd&include_24hr_change=true"
+def analyze_crypto(coin_id, symbol, mode):
+    """Fetch OHLCV historical data and calculate RSI & EMA crossover"""
+    days = "1" if "SHORT" in mode else "30"
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days={days}"
     
     try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            results = []
+        res = requests.get(url, timeout=10)
+        if res.status_code != 200:
+            return None
+        
+        prices = [p[1] for p in res.json().get('prices', [])]
+        if len(prices) < 30:
+            return None
             
-            for key in selected_keys:
-                g_id, display_symbol = COIN_MAPPING[key]
-                coin_data = data.get(g_id, {})
-                price = coin_data.get('usd', 0.0)
-                change = coin_data.get('usd_24h_change', 0.0)
-                
-                # Signal Generation Logic based on 24h Trend
-                if change > 0:
-                    signal = "BUY / LONG"
-                    score = min(round(50 + change * 5), 95)
-                    sl = round(price * 0.98, 4)
-                    tp = round(price * 1.04, 4)
-                else:
-                    signal = "SELL / SHORT"
-                    score = max(round(-50 + change * 5), -95)
-                    sl = round(price * 1.02, 4)
-                    tp = round(price * 0.96, 4)
-                
-                results.append({
-                    "Coin": display_symbol,
-                    "Price ($)": f"${price:,.4f}",
-                    "Score": score,
-                    "Signal": signal,
-                    "Stop Loss ($)": f"${sl:,.4f}",
-                    "Take Profit ($)": f"${tp:,.4f}",
-                    "R:R Ratio": "1:2.0"
+        df = pd.DataFrame({'price': prices})
+        
+        # Calculate EMA 20 & EMA 50
+        df['ema_20'] = df['price'].ewm(span=20, adjust=False).mean()
+        df['ema_50'] = df['price'].ewm(span=50, adjust=False).mean()
+        
+        # Calculate RSI (14 period)
+        delta = df['price'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        latest_price = df['price'].iloc[-1]
+        latest_rsi = round(df['rsi'].iloc[-1], 2)
+        latest_ema20 = df['ema_20'].iloc[-1]
+        latest_ema50 = df['ema_50'].iloc[-1]
+        
+        # Scoring Logic based on Technical Indicators
+        score = 0
+        
+        # RSI Analysis
+        if latest_rsi < 35:
+            score += 40  # Oversold (Strong Buy Signal)
+        elif latest_rsi > 65:
+            score -= 40  # Overbought (Strong Sell Signal)
+            
+        # EMA Trend Crossover Analysis
+        if latest_ema20 > latest_ema50:
+            score += 45  # Bullish Trend
+        else:
+            score -= 45  # Bearish Trend
+            
+        # Final Signal Determination
+        if score >= 50:
+            signal = "STRONG BUY"
+            sl = round(latest_price * 0.98, 4)
+            tp = round(latest_price * 1.04, 4)
+        elif score <= -50:
+            signal = "STRONG SELL"
+            sl = round(latest_price * 1.02, 4)
+            tp = round(latest_price * 0.96, 4)
+        else:
+            signal = "WAIT / NO CLEAR SIGNAL"
+            sl, tp = "N/A", "N/A"
+            
+        # Execute Paper Trade for High Scoring Signals
+        if abs(score) >= 70 and st.session_state.virtual_balance >= 100:
+            if not any(t['Coin'] == symbol for t in st.session_state.trade_history):
+                sl_time = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%H:%M:%S")
+                st.session_state.trade_history.append({
+                    "Time": sl_time,
+                    "Coin": symbol,
+                    "Type": "BUY" if score > 0 else "SELL",
+                    "Entry Price": f"${latest_price:,.4f}",
+                    "RSI": latest_rsi,
+                    "Amount": "$100.00",
+                    "Status": "OPEN"
                 })
-            return results
-    except Exception:
-        pass
-    return None
+                st.session_state.virtual_balance -= 100.0
 
-# Function to style signals
+        return {
+            "Coin": symbol,
+            "Price ($)": f"${latest_price:,.4f}",
+            "RSI (14)": latest_rsi,
+            "EMA Trend": "BULLISH 🟢" if latest_ema20 > latest_ema50 else "BEARISH 🔴",
+            "Score": score,
+            "Signal": signal,
+            "Stop Loss ($)": f"${sl:,.4f}" if isinstance(sl, float) else sl,
+            "Take Profit ($)": f"${tp:,.4f}" if isinstance(tp, float) else tp,
+        }
+    except Exception:
+        return None
+
 def highlight_signals(val):
     if "BUY" in str(val):
         return "background-color: #1b4332; color: #52b788; font-weight: bold;"
-    elif "SHORT" in str(val) or "SELL" in str(val):
+    elif "SELL" in str(val):
         return "background-color: #4a0e17; color: #ff4d6d; font-weight: bold;"
+    elif "WAIT" in str(val):
+        return "color: #e67e22; font-weight: bold;"
     return "color: #888888;"
 
-# Main Action Button
-if st.button("🚀 Start Market Scan & Paper Trade"):
-    with st.spinner("Fetching market data & calculating signals..."):
-        results = fetch_coingecko_data()
-        if results:
-            st.session_state['scan_results'] = results
-            st.session_state['last_scan'] = datetime.now().strftime("%H:%M:%S")
-        else:
-            st.error("API Fetch Error! Please try clicking scan again.")
+# Scan Button
+if st.button("🚀 Run Technical Chart Scan & Trade"):
+    results = []
+    progress_bar = st.progress(0)
+    selected_coins = COINS[:coins_to_scan]
+    
+    for idx, (c_id, sym) in enumerate(selected_coins):
+        res = analyze_crypto(c_id, sym, strategy_mode)
+        if res:
+            results.append(res)
+        progress_bar.progress((idx + 1) / len(selected_coins))
+        
+    progress_bar.empty()
+    st.session_state['scan_results'] = results
+    st.session_state['last_scan'] = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+    st.rerun()
 
-# Display Last Scanned Time
 if 'last_scan' in st.session_state:
-    st.write(f"**Last Scanned:** {st.session_state['last_scan']}")
+    st.write(f"**Last Scanned (Sri Lanka Time):** {st.session_state['last_scan']}")
 
-# Display Data Table
-st.subheader("📊 Live Market Signals")
+# Data Display
+st.subheader("📊 Chart Analysis Signals")
 
 if 'scan_results' in st.session_state and st.session_state['scan_results']:
-    df_results = pd.DataFrame(st.session_state['scan_results'])
+    df = pd.DataFrame(st.session_state['scan_results'])
     st.dataframe(
-        df_results.style.map(highlight_signals, subset=["Signal"]),
+        df.style.map(highlight_signals, subset=["Signal"]),
         use_container_width=True,
-        height=750  # Height 750 ලෙස යෙදූ බැවින් Coins 20ම පහළට එකපාර පෙනේ
+        height=750
     )
 else:
-    st.info("තවම Market Scan එකක් සිදු කර නැත. 'Start Market Scan & Paper Trade' එක Click කරන්න.")
+    st.info("Chart Scan කිරීමට 'Run Technical Chart Scan & Trade' Button එක Click කරන්න.")
 
-# Paper Trading Section
 st.markdown("---")
 st.subheader("📝 Active Paper Trading Orders")
 
 if st.session_state.trade_history:
-    df_trades = pd.DataFrame(st.session_state.trade_history)
-    st.dataframe(df_trades, use_container_width=True)
+    st.dataframe(pd.DataFrame(st.session_state.trade_history), use_container_width=True)
 else:
-    st.info("නැවුම් Paper Trades සටහන් වී නැත. 'Start Market Scan & Paper Trade' එක Click කරන්න.")
+    st.info("High Confidence Signals හමුවූ විට Paper Trades ස්වයංක්‍රීයව මෙතැනට එකතු වේ.")
